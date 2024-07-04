@@ -5,8 +5,8 @@ from torch.nn import functional as F
 # hyperparameters
 batch_size = 64 # how many independent sequences will we process in parallel?
 block_size = 256 # what is the maximum context length for predictions?
-max_iters = 500
-eval_interval = 500
+max_iters = 5000
+eval_interval = 250
 learning_rate = 3e-4
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 torch.backends.cuda.enable_flash_sdp(True) if torch.cuda.is_available() else torch.backends.cuda.enable_flash_sdp(False)
@@ -79,10 +79,10 @@ class Head(nn.Module):
         v = self.value(x) # (B, T, hs)
 
         # Mask to prevent attending to future positions
-        mask = (self.tril[:T, :T].unsqueeze(0)) * B  # (1, T, T) -> (B, T, T) from broadcast
+        mask = (self.tril[:T, :T].unsqueeze(0)) * B  # (B, T, T)
 
         # Perform scaled dot-product attention
-        attn_output = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+        attn_output = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=dropout)
         
         return attn_output
 
