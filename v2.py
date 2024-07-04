@@ -5,10 +5,11 @@ from torch.nn import functional as F
 # hyperparameters
 batch_size = 64 # how many independent sequences will we process in parallel?
 block_size = 256 # what is the maximum context length for predictions?
-max_iters = 5000
+max_iters = 500
 eval_interval = 500
 learning_rate = 3e-4
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
+torch.backends.cuda.enable_flash_sdp(True) if torch.cuda.is_available() else torch.backends.cuda.enable_flash_sdp(False)
 eval_iters = 200
 n_embd = 384
 n_head = 6
@@ -71,23 +72,19 @@ class Head(nn.Module):
         self.value = nn.Linear(n_embd, head_size, bias=False)
         self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size)))
 
-        self.dropout = nn.Dropout(dropout)
-
     def forward(self, x):
-        # input of size (batch, time-step, channels)
-        # output of size (batch, time-step, head size)
-        B,T,C = x.shape
-        k = self.key(x)   # (B,T,hs)
-        q = self.query(x) # (B,T,hs)
-        # compute attention scores ("affinities")
-        wei = q @ k.transpose(-2,-1) * k.shape[-1]**-0.5 # (B, T, hs) @ (B, hs, T) -> (B, T, T)
-        wei = wei.masked_fill(self.tril[:T, :T] == 0, float('-inf')) # (B, T, T)
-        wei = F.softmax(wei, dim=-1) # (B, T, T)
-        wei = self.dropout(wei)
-        # perform the weighted aggregation of the values
-        v = self.value(x) # (B,T,hs)
-        out = wei @ v # (B, T, T) @ (B, T, hs) -> (B, T, hs)
-        return out
+        B, T, C = x.shape
+        k = self.key(x)   # (B, T, hs)
+        q = self.query(x) # (B, T, hs)
+        v = self.value(x) # (B, T, hs)
+
+        # Mask to prevent attending to future positions
+        mask = (self.tril[:T, :T].unsqueeze(0)) * B  # (1, T, T) -> (B, T, T) from broadcast
+
+        # Perform scaled dot-product attention
+        attn_output = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+        
+        return attn_output
 
 class MultiHeadAttention(nn.Module):
     """ multiple heads of self-attention in parallel """
